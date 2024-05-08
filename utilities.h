@@ -7,6 +7,9 @@ const Color WALL_COLOR(33, 33, 255);
 const Color GHOST_HOUSE_GATE_COLOR(252, 181, 255);
 const Color MENU_COLOR(Color::Blue);
 bool isPlayState = false;
+pthread_mutex_t gameEngineMutex, UIMutex,windowCreationMutex, userInputMutex;
+RenderWindow* window;
+bool isWindowCreated = false;
 
 
 bool isbuttonClicked(int x, int y, Text &PlayText)
@@ -76,11 +79,16 @@ public:
         powerPellet_texture.loadFromFile("images/Map16.png");
         pacman.player_texture.loadFromFile("images/Pacman16.png");
         black_texture.loadFromFile("images/Map16.png");
+
+        tile_texture.setSmooth(true);
+        pellet_texture.setSmooth(true);
+        powerPellet_texture.setSmooth(true);
+        pacman.player_texture.setSmooth(true);
+        black_texture.setSmooth(true);
+
         pacman.x = 1;
         pacman.y = 29;
         player_score = 0;
-
-       
 
         for (int i = 0; i < height; i++)
         {
@@ -173,9 +181,11 @@ public:
             pacman.y = new_y;
             pacman.movementDirectionPrev = Keyboard::Unknown;
         }
+
+        
     }
 
-    void drawPacman(RenderWindow &Window)
+    void drawPacman()
     {
         if (pacman.movementDirection != Keyboard::Unknown && pacmanClock.getElapsedTime().asSeconds() >= pacman.player_velocity)
         {
@@ -219,12 +229,12 @@ public:
         pacman.player_sprite.setTexture(pacman.player_texture);
         pacman.player_sprite.setTextureRect(rect);
         pacman.player_sprite.setPosition(pacman.x * CELL_SIZE, pacman.y * CELL_SIZE);
-        Window.draw(pacman.player_sprite);
+        window->draw(pacman.player_sprite);
 
         return;
     }
 
-    void drawGameBoard(RenderWindow &Window)
+    void drawGameBoard()
     {
         for (int i = 0; i < height; i++)
         {
@@ -235,7 +245,7 @@ public:
                     IntRect rect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE); // (left, top, width, height)
                     board[i][j].tile.setTextureRect(rect);
                     board[i][j].tile.setPosition(j * CELL_SIZE, i * CELL_SIZE);
-                    Window.draw(board[i][j].tile);
+                    window->draw(board[i][j].tile);
                 }
 
                 else if (board[i][j].isPellet)
@@ -243,7 +253,7 @@ public:
                     IntRect rect(0, 1 * CELL_SIZE, CELL_SIZE, CELL_SIZE); // (left, top, width, height)
                     board[i][j].tile.setTextureRect(rect);
                     board[i][j].tile.setPosition(j * CELL_SIZE, i * CELL_SIZE);
-                    Window.draw(board[i][j].tile);
+                    window->draw(board[i][j].tile);
                 }
 
                 else if (board[i][j].isPowerPellet)
@@ -254,7 +264,7 @@ public:
                         IntRect rect(1 * CELL_SIZE, 1 * CELL_SIZE, CELL_SIZE, CELL_SIZE); // (left, top, width, height)
                         board[i][j].tile.setTextureRect(rect);
                         board[i][j].tile.setPosition(j * CELL_SIZE, i * CELL_SIZE);
-                        Window.draw(board[i][j].tile);
+                        window->draw(board[i][j].tile);
                     }
                 }
 
@@ -263,7 +273,7 @@ public:
                     IntRect rect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE); // (left, top, width, height)
                     board[i][j].tile.setTextureRect(rect);
                     board[i][j].tile.setPosition(j * CELL_SIZE, i * CELL_SIZE);
-                    Window.draw(board[i][j].tile);
+                    window->draw(board[i][j].tile);
                 }
 
                 else
@@ -271,28 +281,32 @@ public:
                     IntRect rect(1 * CELL_SIZE, 3 * CELL_SIZE, CELL_SIZE, CELL_SIZE); // (left, top, width, height)
                     board[i][j].tile.setTextureRect(rect);
                     board[i][j].tile.setPosition(j * CELL_SIZE, i * CELL_SIZE);
-                    Window.draw(board[i][j].tile);
+                    window->draw(board[i][j].tile);
                 }
             }
         }
-        drawPacman(Window);
+
+        
+
+        drawPacman();
+
+       
+
         if (clock.getElapsedTime().asSeconds() >= powerPelletBlinkDuration)
         {
             powerPellet_state = !powerPellet_state;
             clock.restart();
         }
-        Font font;
-        font.loadFromFile("font/Poppins-Black.ttf");
+        
 
-        scoreText.setFont(font);
-        scoreText.setCharacterSize(24);
-        scoreText.setFillColor(Color::White);
-        scoreText.setString("SCORE: " + std::to_string(player_score));
-        scoreText.setPosition(18*CELL_SIZE,height*CELL_SIZE);
-
-        Window.draw(scoreText);
         return;
     }
 };
 
-gameBoard g(31, 28);
+gameBoard* g;
+void createWindow(){
+    window = new RenderWindow(VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "PAC-MAN");
+    g = new gameBoard(31,28);
+    isWindowCreated = true;
+    return;
+}

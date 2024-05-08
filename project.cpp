@@ -11,9 +11,7 @@
 using namespace sf;
 using namespace std;
 
-pthread_mutex_t gameEngineMutex, UIMutex;
-
-void* UI(void* arg)
+void *UI(void *arg)
 {
     pthread_mutex_lock(&UIMutex);
     RenderWindow menuWindow(VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "PAC-MAN");
@@ -52,8 +50,8 @@ void* UI(void* arg)
                 isPlayState = isbuttonClicked(Mouse::getPosition(menuWindow).x, Mouse::getPosition(menuWindow).y, playText);
                 if (isPlayState == 1)
                 {
-                    pthread_mutex_unlock(&UIMutex);
                     menuWindow.close();
+                    pthread_mutex_unlock(&UIMutex);
                 }
             }
         }
@@ -63,10 +61,26 @@ void* UI(void* arg)
         menuWindow.draw(playText);
         menuWindow.display();
     }
-
-    while(true){
-        g.updateScore();
-        cout << g.player_score << endl;
+    bool isDone = false;
+    while (true)
+    {
+        if (isWindowCreated)
+        {
+            if (!isDone)
+            {
+                pthread_mutex_lock(&windowCreationMutex);
+            }
+            g->scoreText.setString("SCORE: " + std::to_string(g->player_score));
+            g->scoreText.setFont(font);
+            g->scoreText.setCharacterSize(24);
+            g->scoreText.setFillColor(Color::White);
+            g->scoreText.setPosition(18 * CELL_SIZE, g->height * CELL_SIZE);
+            if (!isDone)
+            {
+                pthread_mutex_unlock(&windowCreationMutex);
+                isDone = true;
+            }
+        }
     }
     pthread_exit(NULL);
 }
@@ -74,47 +88,57 @@ void* UI(void* arg)
 void *gameEngine(void *arg)
 {
     pthread_mutex_lock(&gameEngineMutex);
-    sleep(1);
-    RenderWindow window(VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "PAC-MAN");
+    pthread_mutex_lock(&windowCreationMutex);
+    createWindow();
+
     VideoMode desktopMode = VideoMode::getDesktopMode();
     Vector2i windowPosition((desktopMode.width - WINDOW_WIDTH) / 2, (desktopMode.height - WINDOW_HEIGHT) / 2);
-    window.setPosition(windowPosition);
-    while (window.isOpen())
+
+    window->setPosition(windowPosition);
+    pthread_mutex_unlock(&windowCreationMutex);
+
+    while (window->isOpen())
     {
         Event event;
-        while (window.pollEvent(event))
+        while (window->pollEvent(event))
         {
             if (event.type == Event::Closed)
-                window.close();
+            {
+                window->close();
+                isWindowCreated = false;
+            }
 
             if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
             {
-                g.pacman.movementDirectionPrev = g.pacman.movementDirection;
-                g.pacman.movementDirection = Keyboard::Up;
+                g->pacman.movementDirectionPrev = g->pacman.movementDirection;
+                g->pacman.movementDirection = Keyboard::Up;
             }
             else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
             {
-                g.pacman.movementDirectionPrev = g.pacman.movementDirection;
+                g->pacman.movementDirectionPrev = g->pacman.movementDirection;
 
-                g.pacman.movementDirection = Keyboard::Down;
+                g->pacman.movementDirection = Keyboard::Down;
             }
             else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
             {
-                g.pacman.movementDirectionPrev = g.pacman.movementDirection;
+                g->pacman.movementDirectionPrev = g->pacman.movementDirection;
 
-                g.pacman.movementDirection = Keyboard::Left;
+                g->pacman.movementDirection = Keyboard::Left;
             }
             else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
             {
-                g.pacman.movementDirectionPrev = g.pacman.movementDirection;
+                g->pacman.movementDirectionPrev = g->pacman.movementDirection;
 
-                g.pacman.movementDirection = Keyboard::Right;
+                g->pacman.movementDirection = Keyboard::Right;
             }
         }
 
-        window.clear();
-        g.drawGameBoard(window);
-        window.display();
+        window->clear();
+        g->updateScore();
+        g->drawGameBoard();
+        g->updateScore();
+        window->draw(g->scoreText);
+        window->display();
     }
 
     pthread_mutex_unlock(&gameEngineMutex);
@@ -126,6 +150,7 @@ int main()
     pthread_t gameEngineThread, UIThread;
     pthread_mutex_init(&gameEngineMutex, NULL);
     pthread_mutex_init(&UIMutex, NULL);
+    pthread_mutex_init(&windowCreationMutex, NULL);
     pthread_create(&UIThread, NULL, UI, &g);
     sleep(1);
     pthread_mutex_lock(&UIMutex);
@@ -143,5 +168,6 @@ int main()
 
     pthread_mutex_destroy(&gameEngineMutex);
     pthread_mutex_destroy(&UIMutex);
+    pthread_mutex_destroy(&windowCreationMutex);
     return 0;
 }
