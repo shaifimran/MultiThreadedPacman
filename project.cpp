@@ -2,9 +2,10 @@
 #include <iostream>
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
-#include "utilities.h"
+#include <string>
 #include <pthread.h>
 #include <unistd.h>
+#include "utilities.h"
 // g++ -o p project.cpp -lsfml-graphics -lsfml-window -lsfml-system
 
 using namespace sf;
@@ -12,10 +13,14 @@ using namespace std;
 
 pthread_mutex_t gameEngineMutex, UIMutex;
 
-void *UI(void *arg)
+void* UI(void* arg)
 {
     pthread_mutex_lock(&UIMutex);
     RenderWindow menuWindow(VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "PAC-MAN");
+    VideoMode desktopMode = VideoMode::getDesktopMode();
+    Vector2i windowPosition((desktopMode.width - WINDOW_WIDTH) / 2, (desktopMode.height - WINDOW_HEIGHT) / 2);
+    menuWindow.setPosition(windowPosition);
+
     Sprite pacmanLogo;
     Texture logoTexture;
     logoTexture.loadFromFile("images/pacmanLogo.png");
@@ -59,6 +64,10 @@ void *UI(void *arg)
         menuWindow.display();
     }
 
+    while(true){
+        g.updateScore();
+        cout << g.player_score << endl;
+    }
     pthread_exit(NULL);
 }
 
@@ -67,7 +76,9 @@ void *gameEngine(void *arg)
     pthread_mutex_lock(&gameEngineMutex);
     sleep(1);
     RenderWindow window(VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "PAC-MAN");
-    gameBoard g(31, 28);
+    VideoMode desktopMode = VideoMode::getDesktopMode();
+    Vector2i windowPosition((desktopMode.width - WINDOW_WIDTH) / 2, (desktopMode.height - WINDOW_HEIGHT) / 2);
+    window.setPosition(windowPosition);
     while (window.isOpen())
     {
         Event event;
@@ -115,7 +126,7 @@ int main()
     pthread_t gameEngineThread, UIThread;
     pthread_mutex_init(&gameEngineMutex, NULL);
     pthread_mutex_init(&UIMutex, NULL);
-    pthread_create(&UIThread, NULL, UI, NULL);
+    pthread_create(&UIThread, NULL, UI, &g);
     sleep(1);
     pthread_mutex_lock(&UIMutex);
     if (isPlayState == true)
