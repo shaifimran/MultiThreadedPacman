@@ -4,6 +4,7 @@
 #include <SFML/Audio.hpp>
 #include <string>
 #include <pthread.h>
+#include <math.h>
 #include <unistd.h>
 #include "utilities.h"
 // g++ -o p project.cpp -lsfml-graphics -lsfml-window -lsfml-system
@@ -70,7 +71,11 @@ void *UI(void *arg)
             {
                 pthread_mutex_lock(&windowCreationMutex);
             }
+            
+            pthread_mutex_lock(&scoreUpdation);
             g->scoreText.setString("SCORE: " + std::to_string(g->player_score));
+            pthread_mutex_unlock(&scoreUpdation);
+
             g->scoreText.setFont(font);
             g->scoreText.setCharacterSize(24);
             g->scoreText.setFillColor(Color::White);
@@ -134,9 +139,10 @@ void *gameEngine(void *arg)
         }
 
         window->clear();
-        g->updateScore();
+       
         g->drawGameBoard();
         g->updateScore();
+        g->moveGhost();
         window->draw(g->scoreText);
         window->display();
     }
@@ -151,7 +157,8 @@ int main()
     pthread_mutex_init(&gameEngineMutex, NULL);
     pthread_mutex_init(&UIMutex, NULL);
     pthread_mutex_init(&windowCreationMutex, NULL);
-    pthread_create(&UIThread, NULL, UI, &g);
+    pthread_mutex_init(&scoreUpdation, NULL);
+    pthread_create(&UIThread, NULL, UI, NULL);
     sleep(1);
     pthread_mutex_lock(&UIMutex);
     if (isPlayState == true)
@@ -169,5 +176,6 @@ int main()
     pthread_mutex_destroy(&gameEngineMutex);
     pthread_mutex_destroy(&UIMutex);
     pthread_mutex_destroy(&windowCreationMutex);
+    pthread_mutex_destroy(&scoreUpdation);
     return 0;
 }
