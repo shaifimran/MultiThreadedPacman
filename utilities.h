@@ -6,8 +6,9 @@ const int CELL_SIZE = 16;
 const Color WALL_COLOR(33, 33, 255);
 const Color GHOST_HOUSE_GATE_COLOR(252, 181, 255);
 const Color MENU_COLOR(Color::Blue);
-bool isPlayState = false;
-pthread_mutex_t gameEngineMutex, UIMutex, windowCreationMutex, scoreUpdation;
+bool isPlayState = false, isInitialGhostMaking = true;
+pthread_mutex_t windowCreationMutex, scoreUpdation, ghostDrawMutex, pacmanGhost;
+sem_t ghostSem, UISem, gameEngineSem;
 RenderWindow *window;
 bool isWindowCreated = false;
 
@@ -48,16 +49,22 @@ struct Ghost
 {
     int x;
     int y;
-    int prevX = -1;
-    int prevY = -1;
+
     Sprite ghostSprite;
+    Sprite faceSprite;
     Texture ghostTexture;
+    int targetTileX, prevTargetTileX;
+    int targetTileY, prevTargetTileY;
     int sprite_state = 0;
     int direction_state = 0;
-    float ghost_velocity = 0.2f;
-    float ghost_state_changeVelocity = 0.8f;
-    Clock state_change_clock, movementClock;
-    bool isVulnerable;
+    float ghost_velocity = 0.3f;
+    float ghost_state_changeVelocity = 0.3f;
+    float chaseModeON = 20.0f;
+    float chaseModeOFF = 10.0f;
+    Clock state_change_clock, movementClock, chaseModeSwitch;
+    bool isVulnerable = false;
+    bool isChaseMode = false;
+    bool isInHouse = true;
 };
 
 class gameBoard
@@ -75,11 +82,11 @@ public:
     int player_score;
     Player pacman;
     Ghost ghost[4];
+    Color ghostColor[4] = {Color::Red, Color::Cyan, Color::Yellow, Color(255, 192, 203)};
     Clock clock, pacmanClock;
     float powerPelletBlinkDuration = 0.5f; // Time interval for blinking (in seconds)
     Text scoreText;
-    int targetTileX;
-    int targetTileY;
+    int repeatCount = 0;
 
     gameBoard(int height, int width)
     {
@@ -106,22 +113,36 @@ public:
 
         for (int i = 0; i < 4; i++)
         {
+            srand(time(0));
             ghost[i].ghostTexture.loadFromFile("images/Ghost16.png");
             ghost[i].ghostTexture.setSmooth(true);
+            ghost[i].ghostSprite.setColor(ghostColor[i]);
+            ghost[i].targetTileX = rand() % width;
+            ghost[i].targetTileY = rand() % height;
+            ghost[i].prevTargetTileX = -1;
+            ghost[i].prevTargetTileY = -1;
         }
 
+        // red ghost
         ghost[0].y = 11;
         ghost[0].x = 14;
+
+        // cyan ghost
+        ghost[1].y = 15;
+        ghost[1].x = 13;
+
+        // yellow ghost
+        ghost[2].y = 15;
+        ghost[2].x = 15;
+
+        // pink ghost
+        ghost[3].y = 13;
+        ghost[3].x = 14;
+
         pacman.x = 1;
         pacman.y = 29;
         player_score = 0;
 
-        srand(time(0));
-
-        // targetTileX = rand() % width;
-        // targetTileY = rand() % height;
-        targetTileX = 20;
-        targetTileY = 29;
 
         for (int i = 0; i < height; i++)
         {
@@ -145,7 +166,7 @@ public:
                 }
                 if (pixelColor == WALL_COLOR)
                 {
-                    std::cout << j << ' ' <<  i << std::endl;
+                    std::cout << j << ' ' << i << std::endl;
                     board[i][j].isWall = true;
                     board[i][j].tile.setTexture(tile_texture);
                 }
@@ -218,46 +239,86 @@ public:
         }
     }
 
-    void moveGhost()
+    void moveGhosts(int ghostNum)
     {
-        if (ghost[0].movementClock.getElapsedTime().asSeconds() >= ghost[0].ghost_velocity)
+        if (ghost[ghostNum].movementClock.getElapsedTime().asSeconds() >= ghost[ghostNum].ghost_velocity)
         {
+
+            // For Chase Mode OFF
+            if (ghost[ghostNum].isChaseMode && ghost[ghostNum].chaseModeSwitch.getElapsedTime().asSeconds() >= ghost[ghostNum].chaseModeOFF)
+            {
+                ghost[ghostNum].isChaseMode = false;
+                ghost[ghostNum].ghost_velocity += 0.2;
+                ghost[ghostNum].ghost_state_changeVelocity += 0.2;
+                ghost[ghostNum].targetTileX = rand() % width;
+                ghost[ghostNum].targetTileY = rand() % height;
+                ghost[ghostNum].chaseModeSwitch.restart();
+            }
+
+            if (ghost[ghostNum].isChaseMode)
+            {
+                pthread_mutex_lock(&pacmanGhost);
+                ghost[ghostNum].targetTileX = pacman.x;
+                ghost[ghostNum].targetTileY = pacman.y;
+                pthread_mutex_unlock(&pacmanGhost);
+            }
             int distance[4];
-            std::cout << targetTileX << ',' << targetTileY << std::endl;
-            std::cout << pacman.x << ',' << pacman.y << std::endl;
-            std::cout << ghost[0].x << ',' << ghost[0].y << std::endl;
-            std::cout << board[targetTileY][targetTileX].isWall << std::endl;
-            
-            srand(time(0));
-            if ((ghost[0].prevX == ghost[0].x && ghost[0].prevY == ghost[0].y) || (ghost[0].x == targetTileX && ghost[0].y == targetTileY) || (ghost[0].prevX == targetTileX && ghost[0].prevY == targetTileY) || (board[targetTileY][targetTileX].isWall) || (board[targetTileY][targetTileX].isGhostHouseGate))
+            ghost[ghostNum].prevTargetTileX = ghost[ghostNum].targetTileX;
+            ghost[ghostNum].prevTargetTileY = ghost[ghostNum].targetTileY;
+            if (!ghost[ghostNum].isChaseMode)
             {
+                std::cout << ghost[ghostNum].targetTileX << ',' << ghost[ghostNum].targetTileY << std::endl;
+                std::cout << pacman.x << ',' << pacman.y << std::endl;
+                std::cout << ghost[ghostNum].x << ',' << ghost[ghostNum].y << std::endl;
+                std::cout << board[ghost[ghostNum].targetTileY][ghost[ghostNum].targetTileX].isWall << std::endl;
 
-                targetTileX = rand() % width;
-                targetTileY = rand() % height;
-            }
+                srand(time(0));
+                if ((ghost[ghostNum].x == ghost[ghostNum].targetTileX && ghost[ghostNum].y == ghost[ghostNum].targetTileY) || (board[ghost[ghostNum].targetTileY][ghost[ghostNum].targetTileX].isWall) || (board[ghost[ghostNum].targetTileY][ghost[ghostNum].targetTileX].isGhostHouseGate))
+                {
 
-            if ((targetTileY == 3 && ((targetTileX >= 3 && targetTileX <= 4) || (targetTileX >= 8 && targetTileX <= 10) || (targetTileX >= 17 && targetTileX <= 19) || targetTileX == 23 || targetTileX == 24)))
-            {
-                targetTileX = rand() % width;
-                targetTileY = rand() % height;
-            }
+                    ghost[ghostNum].targetTileX = rand() % width;
+                    ghost[ghostNum].targetTileY = rand() % height;
+                }
 
-            if (((targetTileY >= 10 && targetTileY <= 13)) && ((targetTileX >= 0 && targetTileX <= 5) || (targetTileX >= 22 && targetTileX <= 28)))
-            {
-                targetTileX = rand() % width;
-                targetTileY = rand() % height;
-            }
+                if ((ghost[ghostNum].targetTileY == 3 && ((ghost[ghostNum].targetTileX >= 3 && ghost[ghostNum].targetTileX <= 4) || (ghost[ghostNum].targetTileX >= 8 && ghost[ghostNum].targetTileX <= 10) || (ghost[ghostNum].targetTileX >= 17 && ghost[ghostNum].targetTileX <= 19) || ghost[ghostNum].targetTileX == 23 || ghost[ghostNum].targetTileX == 24)))
+                {
+                    ghost[ghostNum].targetTileX = rand() % width;
+                    ghost[ghostNum].targetTileY = rand() % height;
+                }
 
-            if (((targetTileY >= 16 && targetTileY <= 20)) && ((targetTileX >= 0 && targetTileX <= 5) || (targetTileX >= 22 && targetTileX <= 28)))
-            {
-                targetTileX = rand() % width;
-                targetTileY = rand() % height;
-            }
+                if (((ghost[ghostNum].targetTileY >= 10 && ghost[ghostNum].targetTileY <= 13)) && ((ghost[ghostNum].targetTileX >= 0 && ghost[ghostNum].targetTileX <= 5) || (ghost[ghostNum].targetTileX >= 22 && ghost[ghostNum].targetTileX <= 28)))
+                {
+                    ghost[ghostNum].targetTileX = rand() % width;
+                    ghost[ghostNum].targetTileY = rand() % height;
+                }
 
-            if (((targetTileY >= 13 && targetTileY <= 16) && (targetTileX >= 11 && targetTileX <= 17)))
-            {
-                targetTileX = rand() % width;
-                targetTileY = rand() % height;
+                if (((ghost[ghostNum].targetTileY >= 16 && ghost[ghostNum].targetTileY <= 20)) && ((ghost[ghostNum].targetTileX >= 0 && ghost[ghostNum].targetTileX <= 5) || (ghost[ghostNum].targetTileX >= 22 && ghost[ghostNum].targetTileX <= 28)))
+                {
+                    ghost[ghostNum].targetTileX = rand() % width;
+                    ghost[ghostNum].targetTileY = rand() % height;
+                }
+
+                if (((ghost[ghostNum].targetTileY >= 13 && ghost[ghostNum].targetTileY <= 16) && (ghost[ghostNum].targetTileX >= 11 && ghost[ghostNum].targetTileX <= 17)))
+                {
+                    ghost[ghostNum].targetTileX = rand() % width;
+                    ghost[ghostNum].targetTileY = rand() % height;
+                }
+
+                if (repeatCount == 20)
+                {
+                    ghost[ghostNum].targetTileX = rand() % width;
+                    ghost[ghostNum].targetTileY = rand() % height;
+                }
+
+                if (ghost[ghostNum].prevTargetTileX == ghost[ghostNum].targetTileX && ghost[ghostNum].prevTargetTileY == ghost[ghostNum].targetTileY)
+                {
+                    repeatCount++;
+                }
+
+                else
+                {
+                    repeatCount = 0;
+                }
             }
 
             for (int i = 0; i < 4; i++)
@@ -265,114 +326,114 @@ public:
                 distance[i] = INT32_MAX;
             }
             // for right
-            if (ghost[0].direction_state == 0)
+            if (ghost[ghostNum].direction_state == 0)
             {
 
                 // Case Right: direction State = 0
-                if (!board[ghost[0].y][ghost[0].x + 1].isWall && !board[ghost[0].y][ghost[0].x + 1].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y][ghost[ghostNum].x + 1].isWall && !board[ghost[ghostNum].y][ghost[ghostNum].x + 1].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x + 1) - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y) - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x + 1) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y) - ghost[ghostNum].targetTileY), 2);
                     distance[0] = sq_x + sq_y;
                 }
                 // Case Up: direction State = 1
-                if (!board[ghost[0].y - 1][ghost[0].x].isWall && !board[ghost[0].y - 1][ghost[0].x].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y - 1][ghost[ghostNum].x].isWall && !board[ghost[ghostNum].y - 1][ghost[ghostNum].x].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs(ghost[0].x - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y - 1) - targetTileY), 2);
+                    int sq_x = pow(abs(ghost[ghostNum].x - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y - 1) - ghost[ghostNum].targetTileY), 2);
                     distance[1] = sq_x + sq_y;
                 }
-
+                
                 // Case Down: direction State = 3
-                if (!board[ghost[0].y + 1][ghost[0].x].isWall && !board[ghost[0].y + 1][ghost[0].x].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y + 1][ghost[ghostNum].x].isWall && !board[ghost[ghostNum].y + 1][ghost[ghostNum].x].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs(ghost[0].x - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y + 1) - targetTileY), 2);
+                    int sq_x = pow(abs(ghost[ghostNum].x - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y + 1) - ghost[ghostNum].targetTileY), 2);
                     distance[3] = sq_x + sq_y;
                 }
             }
 
             // for up
-            else if (ghost[0].direction_state == 1)
+            else if (ghost[ghostNum].direction_state == 1)
             {
                 // Case Right: direction State = 0
-                if (!board[ghost[0].y][ghost[0].x + 1].isWall && !board[ghost[0].y][ghost[0].x + 1].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y][ghost[ghostNum].x + 1].isWall && !board[ghost[ghostNum].y][ghost[ghostNum].x + 1].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x + 1) - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y) - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x + 1) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y) - ghost[ghostNum].targetTileY), 2);
                     distance[0] = sq_x + sq_y;
                 }
 
                 // Case up: direction State = 1
-                if (!board[ghost[0].y - 1][ghost[0].x].isWall && !board[ghost[0].y - 1][ghost[0].x].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y - 1][ghost[ghostNum].x].isWall && !board[ghost[ghostNum].y - 1][ghost[ghostNum].x].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x) - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y - 1) - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y - 1) - ghost[ghostNum].targetTileY), 2);
                     distance[1] = sq_x + sq_y;
                 }
 
                 // Case Left: direction State = 2
-                if (!board[ghost[0].y][ghost[0].x - 1].isWall && !board[ghost[0].y][ghost[0].x - 1].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y][ghost[ghostNum].x - 1].isWall && !board[ghost[ghostNum].y][ghost[ghostNum].x - 1].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x - 1) - targetTileX), 2);
-                    int sq_y = pow(abs(ghost[0].y - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x - 1) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs(ghost[ghostNum].y - ghost[ghostNum].targetTileY), 2);
                     distance[2] = sq_x + sq_y;
                 }
             }
 
             // for left
-            else if (ghost[0].direction_state == 2)
+            else if (ghost[ghostNum].direction_state == 2)
             {
 
                 // Case up: direction State = 1
-                if (!board[ghost[0].y - 1][ghost[0].x].isWall && !board[ghost[0].y - 1][ghost[0].x].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y - 1][ghost[ghostNum].x].isWall && !board[ghost[ghostNum].y - 1][ghost[ghostNum].x].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x) - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y - 1) - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y - 1) - ghost[ghostNum].targetTileY), 2);
                     distance[1] = sq_x + sq_y;
                 }
 
                 // Case Left: direction State = 2
-                if (!board[ghost[0].y][ghost[0].x - 1].isWall && !board[ghost[0].y][ghost[0].x - 1].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y][ghost[ghostNum].x - 1].isWall && !board[ghost[ghostNum].y][ghost[ghostNum].x - 1].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x - 1) - targetTileX), 2);
-                    int sq_y = pow(abs(ghost[0].y - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x - 1) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs(ghost[ghostNum].y - ghost[ghostNum].targetTileY), 2);
                     distance[2] = sq_x + sq_y;
                 }
 
                 // Case Down: direction State = 3
-                if (!board[ghost[0].y + 1][ghost[0].x].isWall && !board[ghost[0].y + 1][ghost[0].x].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y + 1][ghost[ghostNum].x].isWall && !board[ghost[ghostNum].y + 1][ghost[ghostNum].x].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs(ghost[0].x - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y + 1) - targetTileY), 2);
+                    int sq_x = pow(abs(ghost[ghostNum].x - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y + 1) - ghost[ghostNum].targetTileY), 2);
                     distance[3] = sq_x + sq_y;
                 }
             }
 
             // for down
-            else if (ghost[0].direction_state == 3)
+            else if (ghost[ghostNum].direction_state == 3)
             {
                 // Case Right: direction State = 0
-                if (!board[ghost[0].y][ghost[0].x + 1].isWall && !board[ghost[0].y][ghost[0].x + 1].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y][ghost[ghostNum].x + 1].isWall && !board[ghost[ghostNum].y][ghost[ghostNum].x + 1].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x + 1) - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y) - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x + 1) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y) - ghost[ghostNum].targetTileY), 2);
                     distance[0] = sq_x + sq_y;
                 }
 
                 // Case Left: direction State = 2
-                if (!board[ghost[0].y][ghost[0].x - 1].isWall && !board[ghost[0].y][ghost[0].x - 1].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y][ghost[ghostNum].x - 1].isWall && !board[ghost[ghostNum].y][ghost[ghostNum].x - 1].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs((ghost[0].x - 1) - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y) - targetTileY), 2);
+                    int sq_x = pow(abs((ghost[ghostNum].x - 1) - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y) - ghost[ghostNum].targetTileY), 2);
                     distance[2] = sq_x + sq_y;
                 }
 
                 // Case Down: direction State = 3
-                if (!board[ghost[0].y + 1][ghost[0].x].isWall && !board[ghost[0].y + 1][ghost[0].x].isGhostHouseGate)
+                if (!board[ghost[ghostNum].y + 1][ghost[ghostNum].x].isWall && !board[ghost[ghostNum].y + 1][ghost[ghostNum].x].isGhostHouseGate)
                 {
-                    int sq_x = pow(abs(ghost[0].x - targetTileX), 2);
-                    int sq_y = pow(abs((ghost[0].y + 1) - targetTileY), 2);
+                    int sq_x = pow(abs(ghost[ghostNum].x - ghost[ghostNum].targetTileX), 2);
+                    int sq_y = pow(abs((ghost[ghostNum].y + 1) - ghost[ghostNum].targetTileY), 2);
                     distance[3] = sq_x + sq_y;
                 }
             }
@@ -393,54 +454,69 @@ public:
             // case right
             if (min_index == 0)
             {
-                ghost[0].prevY = ghost[0].y;
-                ghost[0].prevX = ghost[0].x;
-                ghost[0].x += 1;
-                ghost[0].direction_state = 0;
+                pthread_mutex_lock(&ghostDrawMutex);
+                ghost[ghostNum].x += 1;
+                ghost[ghostNum].direction_state = 0;
 
                 // for wrap around
-                if (ghost[0].x> width - 1)
+                if (ghost[ghostNum].x > width - 1)
                 {
-                    ghost[0].x = 0;
+                    ghost[ghostNum].x = 0;
                 }
+                pthread_mutex_unlock(&ghostDrawMutex);
             }
 
             // case up
             else if (min_index == 1)
             {
-                ghost[0].prevY = ghost[0].y;
-                ghost[0].prevX = ghost[0].x;
-                ghost[0].y -= 1;
-                ghost[0].direction_state = 1;
+                pthread_mutex_lock(&ghostDrawMutex);
+                ghost[ghostNum].y -= 1;
+                ghost[ghostNum].direction_state = 1;
+                pthread_mutex_unlock(&ghostDrawMutex);
             }
 
             // case left
             else if (min_index == 2)
             {
-                ghost[0].prevY = ghost[0].y;
-                ghost[0].prevX = ghost[0].x;
-                ghost[0].x -= 1;
-                ghost[0].direction_state = 2;
+                pthread_mutex_lock(&ghostDrawMutex);
+                ghost[ghostNum].x -= 1;
+                ghost[ghostNum].direction_state = 2;
 
                 // for wrap around
-                if (ghost[0].x < 0)
+                if (ghost[ghostNum].x < 0)
                 {
-                    ghost[0].x = width - 1;
+                    ghost[ghostNum].x = width - 1;
                 }
-
-                
+                pthread_mutex_unlock(&ghostDrawMutex);
             }
 
             // case down
             else if (min_index == 3)
             {
-                ghost[0].prevY = ghost[0].y;
-                ghost[0].prevX = ghost[0].x;
-                ghost[0].y += 1;
-                ghost[0].direction_state = 3;
+                pthread_mutex_lock(&ghostDrawMutex);
+                ghost[ghostNum].y += 1;
+                ghost[ghostNum].direction_state = 3;
+                pthread_mutex_unlock(&ghostDrawMutex);
             }
 
-            ghost[0].movementClock.restart();
+            // for Chase Mode ON
+            if (!ghost[ghostNum].isChaseMode && ghost[ghostNum].chaseModeSwitch.getElapsedTime().asSeconds() >= ghost[ghostNum].chaseModeON)
+            {
+
+                pthread_mutex_lock(&ghostDrawMutex);
+                ghost[ghostNum].isChaseMode = true;
+                pthread_mutex_unlock(&ghostDrawMutex);
+                ghost[ghostNum].ghost_velocity -= 0.2;
+                pthread_mutex_lock(&ghostDrawMutex);
+                ghost[ghostNum].ghost_state_changeVelocity -= 0.2;
+                pthread_mutex_unlock(&ghostDrawMutex);
+                pthread_mutex_lock(&pacmanGhost);
+                ghost[ghostNum].targetTileX = pacman.x;
+                ghost[ghostNum].targetTileY = pacman.y;
+                pthread_mutex_unlock(&pacmanGhost);
+                ghost[ghostNum].chaseModeSwitch.restart();
+            }
+            ghost[ghostNum].movementClock.restart();
         }
     }
 
@@ -450,25 +526,34 @@ public:
         {
             if (pacman.movementDirection == Keyboard::Up)
             {
+
                 pacman.direction_state = 1;
+                pthread_mutex_lock(&pacmanGhost);
                 movePacman(pacman.x, pacman.y - 1);
+                pthread_mutex_unlock(&pacmanGhost);
             }
             else if (pacman.movementDirection == Keyboard::Down)
             {
                 pacman.direction_state = 3;
+                pthread_mutex_lock(&pacmanGhost);
                 movePacman(pacman.x, pacman.y + 1);
+                pthread_mutex_unlock(&pacmanGhost);
             }
 
             else if (pacman.movementDirection == Keyboard::Left)
             {
                 pacman.direction_state = 2;
+                pthread_mutex_lock(&pacmanGhost);
                 movePacman(pacman.x - 1, pacman.y);
+                pthread_mutex_unlock(&pacmanGhost);
             }
 
             else if (pacman.movementDirection == Keyboard::Right)
             {
                 pacman.direction_state = 0;
+                pthread_mutex_lock(&pacmanGhost);
                 movePacman(pacman.x + 1, pacman.y);
+                pthread_mutex_unlock(&pacmanGhost);
             }
 
             pacmanClock.restart();
@@ -495,21 +580,39 @@ public:
 
     void drawGhost()
     {
-        if (ghost[0].state_change_clock.getElapsedTime().asSeconds() >= ghost[0].ghost_state_changeVelocity)
-        {
-            ghost[0].sprite_state += 1;
-            ghost[0].state_change_clock.restart();
-        }
 
-        if (ghost[0].sprite_state > 5)
+        for (int i = 0; i < 4; i++)
         {
-            ghost[0].sprite_state = 0;
+            if (ghost[i].state_change_clock.getElapsedTime().asSeconds() >= ghost[i].ghost_state_changeVelocity)
+            {
+                ghost[i].sprite_state += 1;
+                ghost[i].state_change_clock.restart();
+            }
+
+            if (ghost[i].sprite_state > 5)
+            {
+                ghost[i].sprite_state = 0;
+            }
+            IntRect rect(ghost[i].sprite_state * CELL_SIZE, 0, CELL_SIZE, CELL_SIZE);
+            IntRect faceRect;
+            if (ghost[i].isChaseMode)
+            {
+                faceRect = IntRect(ghost[i].direction_state * CELL_SIZE, 2 * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+
+            else
+            {
+                faceRect = IntRect(ghost[i].direction_state * CELL_SIZE, 1 * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+            ghost[i].ghostSprite.setTexture(ghost[i].ghostTexture);
+            ghost[i].faceSprite.setTexture(ghost[i].ghostTexture);
+            ghost[i].ghostSprite.setTextureRect(rect);
+            ghost[i].faceSprite.setTextureRect(faceRect);
+            ghost[i].ghostSprite.setPosition(ghost[i].x * CELL_SIZE, ghost[i].y * CELL_SIZE);
+            ghost[i].faceSprite.setPosition(ghost[i].x * CELL_SIZE, ghost[i].y * CELL_SIZE);
+            window->draw(ghost[i].ghostSprite);
+            window->draw(ghost[i].faceSprite);
         }
-        IntRect rect(ghost[0].sprite_state * CELL_SIZE, 0, CELL_SIZE, CELL_SIZE);
-        ghost[0].ghostSprite.setTexture(ghost[0].ghostTexture);
-        ghost[0].ghostSprite.setTextureRect(rect);
-        ghost[0].ghostSprite.setPosition(ghost[0].x * CELL_SIZE, ghost[0].y * CELL_SIZE);
-        window->draw(ghost[0].ghostSprite);
     }
 
     void drawGameBoard()

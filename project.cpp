@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
@@ -6,15 +5,29 @@
 #include <pthread.h>
 #include <math.h>
 #include <unistd.h>
+#include <semaphore.h>
 #include "utilities.h"
 // g++ -o p project.cpp -lsfml-graphics -lsfml-window -lsfml-system
 
 using namespace sf;
 using namespace std;
 
+void *ghostController(void *arg)
+{
+    sem_wait(&ghostSem);
+    while (1)
+    {
+        g->moveGhosts(*(int *)arg);
+        if (!isWindowCreated){
+            break;
+        }
+    }
+
+    pthread_exit(NULL);
+}
+
 void *UI(void *arg)
 {
-    pthread_mutex_lock(&UIMutex);
     RenderWindow menuWindow(VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "PAC-MAN");
     VideoMode desktopMode = VideoMode::getDesktopMode();
     Vector2i windowPosition((desktopMode.width - WINDOW_WIDTH) / 2, (desktopMode.height - WINDOW_HEIGHT) / 2);
@@ -52,7 +65,7 @@ void *UI(void *arg)
                 if (isPlayState == 1)
                 {
                     menuWindow.close();
-                    pthread_mutex_unlock(&UIMutex);
+                    sem_post(&UISem);
                 }
             }
         }
@@ -71,7 +84,7 @@ void *UI(void *arg)
             {
                 pthread_mutex_lock(&windowCreationMutex);
             }
-            
+
             pthread_mutex_lock(&scoreUpdation);
             g->scoreText.setString("SCORE: " + std::to_string(g->player_score));
             pthread_mutex_unlock(&scoreUpdation);
@@ -92,7 +105,6 @@ void *UI(void *arg)
 
 void *gameEngine(void *arg)
 {
-    pthread_mutex_lock(&gameEngineMutex);
     pthread_mutex_lock(&windowCreationMutex);
     createWindow();
 
@@ -139,43 +151,71 @@ void *gameEngine(void *arg)
         }
 
         window->clear();
-       
+        pthread_mutex_lock(&ghostDrawMutex);
         g->drawGameBoard();
+        if (isInitialGhostMaking)
+        {
+            for(int i = 0 ; i < 4; i++){
+                sem_post(&ghostSem);
+            }
+            isInitialGhostMaking = false;
+        }
+        pthread_mutex_unlock(&ghostDrawMutex);
         g->updateScore();
-        g->moveGhost();
         window->draw(g->scoreText);
         window->display();
     }
-
-    pthread_mutex_unlock(&gameEngineMutex);
+    sem_post(&gameEngineSem);
     pthread_exit(NULL);
 }
 
 int main()
 {
-    pthread_t gameEngineThread, UIThread;
-    pthread_mutex_init(&gameEngineMutex, NULL);
-    pthread_mutex_init(&UIMutex, NULL);
+    // Threads Declaration
+    pthread_t gameEngineThread, UIThread, ghostControllerThread[4];
+
+    // Mutex Initializations
     pthread_mutex_init(&windowCreationMutex, NULL);
     pthread_mutex_init(&scoreUpdation, NULL);
+    pthread_mutex_init(&ghostDrawMutex, NULL);
+    pthread_mutex_init(&pacmanGhost, NULL);
+
+    // Semaphores Initializations
+    sem_init(&ghostSem, 0, 0);
+    sem_init(&UISem, 0, 0);
+    sem_init(&gameEngineSem, 0, 0);
+    
+
     pthread_create(&UIThread, NULL, UI, NULL);
-    sleep(1);
-    pthread_mutex_lock(&UIMutex);
+    sem_wait(&UISem);
     if (isPlayState == true)
     {
         pthread_create(&gameEngineThread, NULL, gameEngine, NULL);
+        int *ghostNum[4] ;
+        for (int i = 0; i < 4; i++)
+        {
+            ghostNum[i] = new int;
+            *ghostNum[i] = i;
+            pthread_create(&ghostControllerThread[i], NULL, ghostController, ghostNum[i]);
+        }
+        
+        sem_wait(&gameEngineSem);
+        for (int i = 0; i < 4;i++){
+            delete ghostNum[i];
+        }
+
     }
-    pthread_mutex_unlock(&UIMutex);
 
-    sleep(1);
-    pthread_mutex_lock(&gameEngineMutex);
-    sleep(1);
 
-    pthread_mutex_unlock(&gameEngineMutex);
-
-    pthread_mutex_destroy(&gameEngineMutex);
-    pthread_mutex_destroy(&UIMutex);
+    // Destroying Mutex
     pthread_mutex_destroy(&windowCreationMutex);
     pthread_mutex_destroy(&scoreUpdation);
+    pthread_mutex_destroy(&ghostDrawMutex);
+    pthread_mutex_destroy(&pacmanGhost);
+
+    // Destroying Semaphores
+    sem_destroy(&ghostSem);
+    sem_destroy(&UISem);
+    sem_destroy(&gameEngineSem);
     return 0;
 }
