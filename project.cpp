@@ -179,11 +179,19 @@ int main()
     pthread_mutex_init(&scoreUpdation, NULL);
     pthread_mutex_init(&ghostDrawMutex, NULL);
     pthread_mutex_init(&pacmanGhost, NULL);
+    pthread_mutex_init(&ghostsMutex, NULL);
+    pthread_mutex_init(&keyDrawMutex, NULL);
+    pthread_mutex_init(&permitDrawMutex, NULL);
+    pthread_mutex_init(&ghostsKeyMutex, NULL);
+    pthread_mutex_init(&ghostsPermitMutex, NULL);
 
     // Semaphores Initializations
     sem_init(&ghostSem, 0, 0);
     sem_init(&UISem, 0, 0);
     sem_init(&gameEngineSem, 0, 0);
+    sem_init(&key, 0, 2);
+    sem_init(&permit, 0, 2);
+    sem_init(&isCloseToTheKeyorPermit, 0, 0);
     
 
     pthread_create(&UIThread, NULL, UI, NULL);
@@ -212,10 +220,18 @@ int main()
     pthread_mutex_destroy(&scoreUpdation);
     pthread_mutex_destroy(&ghostDrawMutex);
     pthread_mutex_destroy(&pacmanGhost);
+    pthread_mutex_destroy(&ghostsMutex);
+    pthread_mutex_destroy(&keyDrawMutex);
+    pthread_mutex_destroy(&permitDrawMutex);
+    pthread_mutex_destroy(&ghostsKeyMutex);
+    pthread_mutex_destroy(&ghostsPermitMutex);
 
     // Destroying Semaphores
     sem_destroy(&ghostSem);
     sem_destroy(&UISem);
     sem_destroy(&gameEngineSem);
+    sem_destroy(&key);
+    sem_destroy(&permit);
+    sem_destroy(&isCloseToTheKeyorPermit);
     return 0;
 }
