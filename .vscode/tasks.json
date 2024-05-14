@@ -12,7 +12,8 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-lsfml-graphics",
                 "-lsfml-window",
-                "-lsfml-system"
+                "-lsfml-system",
+                "-lsfml-audio"
             ],
             "options": {
                 "cwd": "${fileDirname}"
@@ -38,7 +39,8 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-lsfml-graphics",
                 "-lsfml-window",
-                "-lsfml-system"
+                "-lsfml-system",
+                "-lsfml-audio"
             ],
             "options": {
                 "cwd": "${fileDirname}"
