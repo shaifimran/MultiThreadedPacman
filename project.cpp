@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include "utilities.h"
-// g++ -o p project.cpp -lsfml-graphics -lsfml-window -lsfml-system
+// g++ -o p project.cpp -lsfml-graphics -lsfml-audio -lsfml-window -lsfml-system
 
 using namespace sf;
 using namespace std;
